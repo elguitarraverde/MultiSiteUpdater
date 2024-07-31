@@ -18,12 +18,12 @@ class Init extends InitClass
     /** Code that is executed when uninstalling a plugin. */
     public function uninstall(): void
     {
-        // TODO: Implement uninstall() method.
+        //
     }
 
     /** Code to load every time the plugin is enabled or updated. */
     public function update(): void
     {
-        // TODO: Implement update() method.
+        //
     }
 }
