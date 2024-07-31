@@ -2,6 +2,7 @@
 
 namespace FacturaScripts\Plugins\MultiSiteUpdater\MultiSiteUpdater;
 
+use DirectoryIterator;
 use FacturaScripts\Core\Base\FileManager;
 use FacturaScripts\Core\Base\Migrations;
 use FacturaScripts\Core\Base\TelemetryManager;
@@ -42,14 +43,6 @@ class MultiSiteUpdater
     {
         $items = [];
 
-        // comprobamos si se puede actualizar el core
-        if (Forja::canUpdateCore()) {
-            $item = self::getUpdateItemsCore();
-            if (!empty($item)) {
-                $items[] = $item;
-            }
-        }
-
         // comprobamos si se puede actualizar algún plugin
         foreach (Plugins::list() as $plugin) {
             $item = self::getUpdateItemsPlugin($plugin);
@@ -61,25 +54,17 @@ class MultiSiteUpdater
         return $items;
     }
 
-    /** Remove downloaded file. */
-//    private function cancelAction():void
-//    {
-//        $fileName = 'update-' . $this->request->get('item', '') . '.zip';
-//        if (file_exists(Tools::folder($fileName))) {
-//            unlink(Tools::folder($fileName));
-//            Tools::log()->notice('record-deleted-correctly');
-//        }
-//
-//        Tools::log()->notice('reloading');
-//        $this->redirect($this->getClassName() . '?action=post-update', 3);
-//    }
-
-    /** Download selected update.
+    /**
+     * Download selected update.
+     *
      * @param string $idItem
      * @param string $disable
+     *
+     * @return bool
      */
-    public function downloadAction(string $idItem, string $disable = ''): void
+    public function downloadAction(string $idItem, string $disable = ''): bool
     {
+        $success = true;
         $this->updaterItems = self::getUpdateItems();
         foreach ($this->updaterItems as $key => $item) {
             if ($item['id'] != $idItem) {
@@ -103,74 +88,15 @@ class MultiSiteUpdater
                 '%error%' => $http->errorMessage(),
                 '%status%' => $http->status(),
             ]);
+            $success = false;
         }
 
         // ¿Hay que desactivar algo?
         foreach (explode(',', $disable) as $plugin) {
             Plugins::disable($plugin);
         }
-    }
 
-//    protected function execAction(string $action):void
-//    {
-//        switch ($action) {
-//            case 'claim-install':
-//                $this->redirect($this->telemetryManager->claimUrl());
-//                return;
-//
-//            case 'register':
-//                if ($this->telemetryManager->install()) {
-//                    Tools::log()->notice('record-updated-correctly');
-//                    break;
-//                }
-//                Tools::log()->error('record-save-error');
-//                break;
-//
-//            case 'unlink':
-//                if ($this->telemetryManager->unlink()) {
-//                    $this->telemetryManager = new TelemetryManager();
-//                    Tools::log()->notice('unlink-install-ok');
-//                    break;
-//                }
-//                Tools::log()->error('unlink-install-ko');
-//                break;
-//        }
-//
-//        $this->updaterItems = self::getUpdateItems();
-//        $this->setCoreWarnings();
-//    }
-
-    private static function getUpdateItemsCore(): array
-    {
-        $fileName = 'update-' . Forja::CORE_PROJECT_ID . '.zip';
-        foreach (Forja::getBuilds(Forja::CORE_PROJECT_ID) as $build) {
-            if ($build['version'] <= self::getCoreVersion()) {
-                continue;
-            }
-
-            $item = [
-                'description' => Tools::lang()->trans('core-update', ['%version%' => $build['version']]),
-                'downloaded' => file_exists(Tools::folder($fileName)),
-                'filename' => $fileName,
-                'id' => Forja::CORE_PROJECT_ID,
-                'name' => 'CORE',
-                'stable' => $build['stable'],
-                'url' => self::UPDATE_CORE_URL . '/' . Forja::CORE_PROJECT_ID . '/' . $build['version'],
-                'version' => $build['version'],
-                'mincore' => 0,
-                'maxcore' => 0,
-            ];
-
-            if ($build['stable']) {
-                return $item;
-            }
-
-            if ($build['beta'] && Tools::settings('default', 'enableupdatesbeta', false)) {
-                return $item;
-            }
-        }
-
-        return [];
+        return $success;
     }
 
     private static function getUpdateItemsPlugin(Plugin $plugin): array
@@ -210,7 +136,7 @@ class MultiSiteUpdater
         return [];
     }
 
-    private function postUpdateAction($plugName): void
+    private function postUpdateAction($plugName = ''): void
     {
         if ($plugName) {
             Plugins::deploy(true, true);
@@ -220,46 +146,6 @@ class MultiSiteUpdater
         Migrations::run();
         Plugins::deploy(true, true);
     }
-
-//    private function setCoreWarnings():void
-//    {
-//        // comprobamos si hay actualización del core
-//        $newCore = 0;
-//        foreach ($this->updaterItems as $item) {
-//            if ($item['id'] === Forja::CORE_PROJECT_ID) {
-//                $newCore = $item['version'];
-//                break;
-//            }
-//        }
-//        if (empty($newCore)) {
-//            return;
-//        }
-//
-//        // comprobamos los plugins instalados
-//        foreach (Plugins::list() as $plugin) {
-//            // ¿El plugin está activo?
-//            if (false === $plugin->enabled) {
-//                continue;
-//            }
-//
-//            // ¿Funcionará con el nuevo core?
-//            if ($this->willItWorkOnNewCore($plugin, $newCore)) {
-//                continue;
-//            }
-//
-//            // ¿Hay actualización para el nuevo core?
-//            if ($plugin->forja('maxcore', 0) >= $newCore) {
-//                $this->coreUpdateWarnings[$plugin->name] = Tools::lang()->trans('plugin-need-update', [
-//                    '%plugin%' => $plugin->name,
-//                ]);
-//                continue;
-//            }
-//
-//            $this->coreUpdateWarnings[$plugin->name] = Tools::lang()->trans('plugin-need-update-but', [
-//                '%plugin%' => $plugin->name,
-//            ]);
-//        }
-//    }
 
     /**
      * Extract zip file and update all files.
@@ -293,9 +179,7 @@ class MultiSiteUpdater
         }
 
         // extract core/plugin zip file
-        $done = ($idItem == Forja::CORE_PROJECT_ID) ?
-            $this->updateCore($zip, $fileName) :
-            $this->updatePlugin($zip, $fileName);
+        $done = $this->updatePlugin($zip, $fileName);
 
         if ($done) {
             Plugins::deploy(true, false);
@@ -305,47 +189,6 @@ class MultiSiteUpdater
         }
 
         return false;
-    }
-
-    private function updateCore(ZipArchive $zip, string $fileName): bool
-    {
-        // extract zip content
-        if (false === $zip->extractTo(FS_FOLDER)) {
-            Tools::log()->critical('ZIP EXTRACT ERROR: ' . $fileName);
-            $zip->close();
-            return false;
-        }
-
-        // remove zip file
-        $zip->close();
-        unlink(Tools::folder($fileName));
-
-        // update folders
-        foreach (['Core', 'node_modules', 'vendor'] as $folder) {
-            $origin = Tools::folder(self::CORE_ZIP_FOLDER, $folder);
-            $dest = Tools::folder($folder);
-            if (false === file_exists($origin)) {
-                Tools::log()->critical('COPY ERROR: ' . $origin);
-                return false;
-            }
-
-            FileManager::delTree($dest);
-            if (false === FileManager::recurseCopy($origin, $dest)) {
-                Tools::log()->critical('COPY ERROR2: ' . $origin);
-                return false;
-            }
-        }
-
-        // update files
-        foreach (['index.php', 'replace_index_to_restore.php'] as $name) {
-            $origin = Tools::folder(self::CORE_ZIP_FOLDER, $name);
-            $dest = Tools::folder($name);
-            copy($origin, $dest);
-        }
-
-        // remove zip folder
-        FileManager::delTree(Tools::folder(self::CORE_ZIP_FOLDER));
-        return true;
     }
 
     private function updatePlugin(ZipArchive $zip, string $fileName): bool
@@ -360,21 +203,9 @@ class MultiSiteUpdater
         return $return;
     }
 
-//    private function willItWorkOnNewCore(Plugin $plugin, float $newCore):bool
-//    {
-//        // buscamos información del plugin en la forja
-//        foreach (Forja::getBuildsByName($plugin->name) as $build) {
-//            if ($build['version'] == $plugin->version) {
-//                // si soporta un core mayor o igual al que estamos actualizando, entonces funcionará
-//                return $build['maxcore'] >= $newCore;
-//            }
-//        }
-//
-//        return false;
-//    }
     public function getPlugin($idPlugin)
     {
-        $this->updaterItems = self::getUpdateItems();
+        $this->updaterItems = self::getUpdateItemsFromDisk();
         foreach ($this->updaterItems as $key => $item) {
             if ($item['id'] != $idPlugin) {
                 continue;
@@ -384,5 +215,42 @@ class MultiSiteUpdater
         }
 
         return null;
+    }
+
+    public static function getUpdateItemsFromDisk(): array
+    {
+        $items = [];
+
+        // comprobamos si se puede actualizar algún plugin
+        foreach (self::loadPluginsFromDisk() as $plugin) {
+            $item = self::getUpdateItemsPlugin($plugin);
+            if (!empty($item)) {
+                $items[] = $item;
+            }
+        }
+
+        return $items;
+    }
+
+    private static function loadPluginsFromDisk(): array
+    {
+        $folder = FS_FOLDER . DIRECTORY_SEPARATOR . 'Plugins';
+        if (false === file_exists($folder)) {
+            return [];
+        }
+
+        $plugins = [];
+        $dir = new DirectoryIterator($folder);
+        foreach ($dir as $file) {
+            if (false === $file->isDir() || $file->isDot()) {
+                continue;
+            }
+
+            $pluginName = $file->getFilename();
+            $plugin = new Plugin(['name' => $pluginName]);
+            $plugins[] = $plugin;
+        }
+
+        return $plugins;
     }
 }
