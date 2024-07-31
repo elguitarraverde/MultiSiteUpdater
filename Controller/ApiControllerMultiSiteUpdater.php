@@ -2,6 +2,8 @@
 
 namespace FacturaScripts\Plugins\MultiSiteUpdater\Controller;
 
+use FacturaScripts\Core\Internal\Forja;
+use FacturaScripts\Core\Plugins;
 use FacturaScripts\Core\Template\ApiController;
 use FacturaScripts\Plugins\MultiSiteUpdater\MultiSiteUpdater\MultiSiteUpdater;
 use Symfony\Component\HttpFoundation\Response;
@@ -25,14 +27,17 @@ class ApiControllerMultiSiteUpdater extends ApiController
 
     protected function updatePlugin()
     {
-        $multiSiteUpdater = new MultiSiteUpdater();
+        $idPlugin = $this->request->get('id', '');
 
-        // descargamos y actualizamos el plugin
-        $idItem = $this->request->get('item', '');
-        $updatedPlugin = $multiSiteUpdater->downloadAction($idItem) && $multiSiteUpdater->updateAction($idItem);
+        // evitamos que se actualice el Core
+        if($idPlugin == Forja::CORE_PROJECT_ID){
+            return $this->jsonResponse(false, 'No está permitido actualizar el Core desde la API', []);
+        }
+
+        $multiSiteUpdater = new MultiSiteUpdater();
+        $updatedPlugin = $multiSiteUpdater->downloadAction($idPlugin) && $multiSiteUpdater->updateAction($idPlugin);
 
         // obtenemos los datos del plugin actualizado
-        $idPlugin = $this->request->get('item', '');
         $plugin = $multiSiteUpdater->getPlugin($idPlugin);
 
         $response = $this->jsonResponse(true, 'Plugin actualizado correctamente', compact('plugin'));
